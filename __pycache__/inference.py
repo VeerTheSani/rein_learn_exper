@@ -29,7 +29,7 @@ def env_reset(task_id: str) -> dict:
     return r.json()
 
 def env_step(action_payload: dict) -> dict:
-    r = requests.post(f"{ENV_BASE_URL}/step", json={"action": action_payload}, timeout=30)
+    r = requests.post(f"{ENV_BASE_URL}/step", json=action_payload, timeout=30)
     r.raise_for_status()
     return r.json()
 

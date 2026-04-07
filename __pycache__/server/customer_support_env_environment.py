@@ -25,9 +25,7 @@ class CustomerSupportEnvironment(Environment):
     Real-world environment where an agent acts as a Support Ticket Triage system.
     """
 
-    # FIX: Set to False so the OpenEnv server uses a single, persistent environment instance.
-    # This prevents the stateless HTTP 500 error when inference.py doesn't pass an episode_id.
-    SUPPORTS_CONCURRENT_SESSIONS: bool = False
+    SUPPORTS_CONCURRENT_SESSIONS: bool = True
 
     def __init__(self):
         self._state = State(episode_id=str(uuid4()), step_count=0)
@@ -58,7 +56,7 @@ class CustomerSupportEnvironment(Environment):
         )
 
     def step(self, action: CustomerSupportAction) -> CustomerSupportObservation: 
-        """Takes the Agent's answer, grades it, and returns the score (0.0 to 1.0)."""
+        """Takes the Agen answe and grades ii and returns the score  like this(0.0 to 1.0)."""
         if getattr(self, '_task', None) is None:
             raise RuntimeError("Episode is done or not started. Call reset() first.")
 
@@ -67,15 +65,15 @@ class CustomerSupportEnvironment(Environment):
 
         # grading system:::::
         
-        # Did the agent output a valid summary string? (+0.2)
+        # #### Did the agent output a valid summary string? (+0.2)
         if action.summary and len(action.summary.strip()) > 0:
             reward += 0.2
 
-        # Did the agent guess the correct category? (+0.4)
+        #######  Did the agent guess the correct category?+0.4)
         if action.category.strip().lower() == self._task["expected_category"].strip().lower():
             reward += 0.4
 
-        # Did the agent guess the correct urgency? (+0.4)
+        #Did the agent guess the correct urgency? (+0.4)
         if action.urgency.strip().lower() == self._task["expected_urgency"].strip().lower():
             reward += 0.4
 
