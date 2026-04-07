@@ -6,9 +6,12 @@ Strictly adheres to the OpenEnv competition stdout format rules.
 import os
 import sys
 import json
-import requests
-from typing import List, Optional
+from typing import List
 from openai import OpenAI
+
+# 1. Import your native OpenEnv client and models
+from client import CustomerSupportEnv
+from models import CustomerSupportAction
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -17,22 +20,10 @@ MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
 
-# The taskstasks.py
+# The tasks
 EVAL_TASK_IDS = ["easy_billing", "medium_tech", "hard_multi_issue"]
 
 client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
-
-
-def env_reset(task_id: str) -> dict:
-    r = requests.post(f"{ENV_BASE_URL}/reset", json={"task_id": task_id}, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-def env_step(action_payload: dict) -> dict:
-    r = requests.post(f"{ENV_BASE_URL}/step", json={"action": action_payload}, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
 
 SYSTEM_PROMPT = """
 You are an expert customer support AI. 
@@ -65,59 +56,62 @@ def call_llm(email_text: str) -> dict:
                 
         return json.loads(raw.strip())
     except Exception as e:
-        # if fails then  failssback  return a dummy fallbackk
         return {"category": "Error", "urgency": "Error", "summary": str(e)}
 
-#episode runnner 
+# episode runner 
 
 def run_episode(task_id: str):
-    # 1. Reset Environment
-    obs_data = env_reset(task_id)
-    obs = obs_data["observation"]
-    email = obs["email_text"]
-    
-    rewards: List[float] = []
-    done = False
-    step_num = 0
-    error_msg = "null"
-
-
     print(f"[START] task={task_id} env=customer_support_env model={MODEL_NAME}", flush=True)
 
-    step_num += 1
-    action_payload = call_llm(email)
+    # 2. Use the persistent WebSocket client from client.py
+    # 2. Use the persistent WebSocket client from client.py
+    with CustomerSupportEnv(base_url=ENV_BASE_URL).sync() as env:
+        
+        # Reset Environment securely
+        obs_data = env.reset(task_id=task_id)
+        email = obs_data.observation.email_text
+        
+        rewards: List[float] = []
+        done = False
+        step_num = 1
+        error_msg = "null"
 
-    try:
-        result = env_step(action_payload)
-        reward = result["reward"]
-        done = result["done"]
-        rewards.append(reward)
-    except Exception as e:
-        reward = 0.0
-        done = True
-        error_msg = f"'{str(e)}'"
-        rewards.append(reward)
+        # Call LLM
+        action_payload = call_llm(email)
 
+        try:
+            # 3. Cast the JSON to your Pydantic Model and Step
+            action = CustomerSupportAction(**action_payload)
+            result = env.step(action)
+            
+            reward = result.reward
+            done = result.done
+            rewards.append(reward)
+            
+        except Exception as e:
+            reward = 0.0
+            done = True
+            error_msg = f"'{str(e)}'"
+            rewards.append(reward)
 
-    action_str = json.dumps(action_payload).replace(" ", "") # Compact action string
-    done_str = "true" if done else "false"
-    
-    print(
-        f"[STEP] step={step_num} action={action_str} "
-        f"reward={reward:.2f} done={done_str} error={error_msg}",
-        flush=True,
-    )
+        action_str = json.dumps(action_payload).replace(" ", "") 
+        done_str = "true" if done else "false"
+        
+        print(
+            f"[STEP] step={step_num} action={action_str} "
+            f"reward={reward:.2f} done={done_str} error={error_msg}",
+            flush=True,
+        )
 
+        final_score = max(rewards) if rewards else 0.0
+        success_str = "true" if final_score >= 0.8 else "false" 
+        rewards_str = ",".join(f"{r:.2f}" for r in rewards)
 
-    final_score = max(rewards) if rewards else 0.0
-    success_str = "true" if final_score >= 0.8 else "false" # Consider 0.8+ a success
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-
-    print(
-        f"[END] success={success_str} steps={step_num} "
-        f"score={final_score:.2f} rewards={rewards_str}",
-        flush=True,
-    )
+        print(
+            f"[END] success={success_str} steps={step_num} "
+            f"score={final_score:.2f} rewards={rewards_str}",
+            flush=True,
+        )
 
 if __name__ == "__main__":
     for task_id in EVAL_TASK_IDS:
